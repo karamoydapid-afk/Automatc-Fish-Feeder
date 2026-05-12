@@ -406,33 +406,67 @@ body::before {
 
 <script>
 /* ═══════════════════════════════════════════════════════════
-   KONFIGURASI BLYNK
-   Ganti dua nilai di bawah ini setelah akun Blynk dibuat.
-   Selama masih default → app jalan mode simulasi lokal.
+   KONFIGURASI BLYNK FINAL
 ═══════════════════════════════════════════════════════════ */
+
 const BLYNK_TOKEN  = 'AuDjwLKkgTUwmQ8p2W_pqOMRA_peaf57';
 const BLYNK_SERVER = 'https://blynk.cloud';
 
-// Virtual Pin — harus sama persis dengan kode Arduino
+// Virtual pin HARUS sama dengan Arduino
 const VPIN = {
-  berat:   'V0',   // float  — berat pakan dari load cell / simulasi
-  mode:    'V1',   // int    — 0=auto, 1=manual
-  feedBtn: 'V3',   // button — trigger feed manual dari app
-  count:   'V5',   // int    — jumlah feed hari ini
+  berat:   'V0',
+  mode:    'V1',
+  feedBtn: 'V3',
+  count:   'V5',
 };
 
+// ======================================================
+// GET DATA DARI BLYNK
+// ======================================================
+
 async function bGet(pin) {
+
   try {
-    const r = await fetch(`${BLYNK_SERVER}/external/api/get?token=${BLYNK_TOKEN}&${pin}`);
-    if (!r.ok) throw 0;
-    return await r.json();
-  } catch { return null; }
-}
-async function bSet(pin, val) {
-  try { await fetch(`${BLYNK_SERVER}/external/api/update?token=${BLYNK_TOKEN}&${pin}=${val}`); }
-  catch {}
+
+    const url =
+      `${BLYNK_SERVER}/external/api/get?token=${BLYNK_TOKEN}&${pin}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error("GET gagal");
+    }
+
+    const text = await response.text();
+
+    return text;
+
+  } catch (err) {
+
+    console.log("BLYNK GET ERROR:", err);
+
+    return null;
+  }
 }
 
+// ======================================================
+// KIRIM DATA KE BLYNK
+// ======================================================
+
+async function bSet(pin, val) {
+
+  try {
+
+    const url =
+      `${BLYNK_SERVER}/external/api/update?token=${BLYNK_TOKEN}&${pin}=${val}`;
+
+    await fetch(url);
+
+  } catch (err) {
+
+    console.log("BLYNK SET ERROR:", err);
+  }
+}
 /* STATE */
 const S = {
   berat: 8.0, beratMax: 10.0,
@@ -625,28 +659,73 @@ function toast(msg) {
   clearTimeout(tTimer); tTimer=setTimeout(()=>t.classList.remove('show'),2600);
 }
 
-/* BLYNK POLL — setiap 3 detik
-   Saat load cell terpasang, berat akan otomatis terupdate dari sini */
+// ======================================================
+// POLLING DATA DARI ESP32 VIA BLYNK
+// ======================================================
+
 async function poll() {
-  if (BLYNK_TOKEN==='ISI_TOKEN_BLYNK_KAMU') return;
-  const b=await bGet(VPIN.berat);
-  if (b!==null) {
-    const beratBaru=parseFloat(b);
-    // Deteksi isi ulang: jika berat naik signifikan, catat di histori
-    if (beratBaru > S.berat + 0.5) {
-      hist.push({t:new Date(), b:beratBaru});
-      if (hist.length>24) hist.shift();
-      toast('Pakan telah diisi ulang');
+
+  // =========================
+  // BERAT PAKAN
+  // =========================
+
+  const beratData = await bGet(VPIN.berat);
+
+  if (beratData !== null) {
+
+    const beratBaru = parseFloat(beratData);
+
+    if (!isNaN(beratBaru)) {
+
+      // deteksi refill
+      if (beratBaru > S.berat + 0.5) {
+
+        hist.push({
+          t: new Date(),
+          b: beratBaru
+        });
+
+        if (hist.length > 24) {
+          hist.shift();
+        }
+
+        toast('Pakan berhasil diisi ulang');
+      }
+
+      S.berat = beratBaru;
+
+      S.online = true;
     }
-    S.berat=beratBaru; S.online=true;
-  } else { S.online=false; }
-  const m=await bGet(VPIN.mode);
-  if (m!==null) S.manual=parseInt(m)===1;
-  const c=await bGet(VPIN.count);
-  if (c!==null) S.count=parseInt(c);
+
+  } else {
+
+    S.online = false;
+  }
+
+  // =========================
+  // MODE
+  // =========================
+
+  const modeData = await bGet(VPIN.mode);
+
+  if (modeData !== null) {
+
+    S.manual = parseInt(modeData) === 1;
+  }
+
+  // =========================
+  // FEED COUNT
+  // =========================
+
+  const countData = await bGet(VPIN.count);
+
+  if (countData !== null) {
+
+    S.count = parseInt(countData);
+  }
+
   ui();
 }
-
 tick(); ui();
 setInterval(tick, 1000);
 setInterval(ui, 1000);
