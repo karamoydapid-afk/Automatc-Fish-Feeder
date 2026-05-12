@@ -1,0 +1,5 @@
+[[redirects]]
+  from = "/external/api/*"
+  to = "https://blynk.cloud/external/api/:splat"
+  status = 200
+  force = true
