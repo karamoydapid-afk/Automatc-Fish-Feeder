@@ -222,7 +222,7 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
 .setting-refill-btn{margin:10px 24px 0;width:calc(100% - 48px);background:var(--green);color:white;border:none;border-radius:var(--r-md);padding:16px;font-family:var(--mono);font-size:10px;letter-spacing:2px;cursor:pointer;transition:opacity .2s;display:flex;align-items:center;justify-content:center;gap:8px}
 .setting-refill-btn:active{opacity:.8}
 
-/* FIX INDICATOR — muncul saat param sedang diproteksi dari poll */
+/* PARAM PROTECTED BADGE */
 .param-protected-badge{display:none;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--accent);background:#f5ede0;border:1px solid #e8d4bc;border-radius:99px;padding:4px 12px;margin:8px 24px 0}
 .param-protected-badge.show{display:flex}
 .param-protected-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:blink 1s ease-in-out infinite}
@@ -311,7 +311,6 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
   </div>
   <div class="divider reveal d1"></div>
 
-  <!-- Alarm banner — hanya muncul jika buzzer sedang berbunyi -->
   <div class="alarm-banner hidden" id="alarmBanner">
     <div style="flex:1">
       <div class="alarm-banner-title">⚠ Pakan Hampir Habis — Buzzer Aktif</div>
@@ -320,7 +319,6 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
     <button class="alarm-banner-btn" onclick="cmdMatikanBuzzer()">Matikan</button>
   </div>
 
-  <!-- Reminder banner — muncul setelah buzzer dimatikan, pakan belum diisi -->
   <div class="reminder-banner hidden" id="reminderBanner">
     <div style="flex:1">
       <div class="reminder-banner-title">🔔 Pengingat: Pakan Perlu Diisi Ulang</div>
@@ -490,7 +488,6 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
   </div>
   <div class="divider" style="margin-top:20px"></div>
 
-  <!-- Parameter Pakan -->
   <div class="setting-section">
     <div class="setting-section-label">Parameter Pakan → ESP32</div>
     <div class="setting-card">
@@ -521,17 +518,15 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
     </div>
   </div>
 
-  <!-- FIX: Badge indikator proteksi param — muncul selama 10 detik setelah kirim -->
   <div class="param-protected-badge" id="paramProtectedBadge">
     <span class="dot"></span>
-    Parameter terproteksi · sinkronisasi ESP32...
+    Parameter terproteksi · menunggu konfirmasi ESP32...
   </div>
 
   <button class="setting-save-btn" onclick="simpanDanKirimPengaturan()">
     <span class="send-icon">📡</span> SIMPAN & KIRIM KE ESP32
   </button>
 
-  <!-- Refill sebagai aksi terpisah yang disengaja -->
   <div class="setting-section" style="margin-top:20px">
     <div class="setting-section-label">Pengisian Ulang Pakan</div>
     <div class="setting-card">
@@ -547,7 +542,6 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
     <span>📦</span> REFILL — RESET BERAT KE PENUH
   </button>
 
-  <!-- Info Device -->
   <div class="setting-section" style="margin-top:24px">
     <div class="setting-section-label">Status Perangkat (Real-time dari ESP32)</div>
     <div class="device-info-card">
@@ -565,7 +559,6 @@ body::before{content:'';position:fixed;inset:0;opacity:.022;background-image:url
     </div>
   </div>
 
-  <!-- Data Lokal -->
   <div class="setting-section" style="margin-top:24px">
     <div class="setting-section-label">Data Lokal</div>
     <div class="setting-card">
@@ -615,7 +608,6 @@ const VP = {
 // ═══════════════════════════════════════════════════════════
 // BLYNK API HELPERS
 // ═══════════════════════════════════════════════════════════
-
 async function bGet(pin) {
   try {
     const r = await fetch(
@@ -650,7 +642,6 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
-
 const S = {
   berat:        null,
   manual:       false,
@@ -667,15 +658,10 @@ const S = {
   t0: Date.now(),
 };
 
-// ─────────────────────────────────────────────────────────────
-// FIX: Timestamp proteksi parameter dari overwrite saat polling.
-// Setelah user menekan "Simpan & Kirim ke ESP32", nilai lokal
-// S.porsi / S.alarmBatas / S.kapasitas TIDAK akan ditimpa oleh
-// data lama dari poll selama 10 detik — cukup waktu ESP32 update.
-// ─────────────────────────────────────────────────────────────
+// Proteksi parameter selama 10 detik setelah kirim
 let paramPendingUntil = 0;
 
-// Variabel untuk reminder notifikasi
+// Variabel reminder
 let reminderIntervalId  = null;
 let reminderCount       = 0;
 let reminderActive      = false;
@@ -689,7 +675,6 @@ let hist    = [];
 // ═══════════════════════════════════════════════════════════
 // POLLING — tiap 3 detik
 // ═══════════════════════════════════════════════════════════
-
 async function poll() {
   const [
     rawBerat, rawMode, rawCount,
@@ -704,7 +689,31 @@ async function poll() {
   S.online = rawBerat !== null;
   if (!S.online) { ui(); return; }
 
-  // Berat — selalu diperbarui dari ESP32 (berat fisik sensor)
+  // ──────────────────────────────────────────────────────────
+  // FIXED: Urutan update state sangat penting.
+  // Kapasitas harus diupdate SEBELUM berat agar kalkulasi
+  // persentase di ui() langsung menggunakan nilai yang benar.
+  // ──────────────────────────────────────────────────────────
+  const isProtected = Date.now() < paramPendingUntil;
+
+  if (!isProtected) {
+    // Update kapasitas DULU sebelum berat
+    if (rawKap   !== null) {
+      const kapBaru = parseFloat(rawKap);
+      if (!isNaN(kapBaru) && kapBaru > 0) S.kapasitas = kapBaru;
+    }
+    if (rawPorsi !== null) {
+      const porsiBaru = parseFloat(rawPorsi);
+      if (!isNaN(porsiBaru)) S.porsi = porsiBaru;
+    }
+    if (rawAlarm !== null) {
+      const alarmBaru = parseFloat(rawAlarm);
+      if (!isNaN(alarmBaru)) S.alarmBatas = alarmBaru;
+    }
+  }
+  updateParamProtectedBadge();
+
+  // Berat — selalu diperbarui dari ESP32
   const beratBaru = parseFloat(rawBerat);
   if (!isNaN(beratBaru)) {
     if (S.berat !== null) {
@@ -737,37 +746,18 @@ async function poll() {
     S.berat = beratBaru;
   }
 
-  // Mode, count — selalu diperbarui
   if (rawMode  !== null) S.manual = parseInt(rawMode) === 1;
   if (rawCount !== null) S.count  = parseInt(rawCount);
-
-  // ─────────────────────────────────────────────────────────
-  // FIX: Porsi, Alarm, Kapasitas — DIPROTEKSI selama 10 detik
-  // setelah user menekan "Simpan & Kirim ke ESP32".
-  // Ini mencegah nilai lama dari Blynk menimpa nilai baru
-  // sebelum ESP32 sempat menyimpan dan mengembalikannya.
-  // ─────────────────────────────────────────────────────────
-  const isProtected = Date.now() < paramPendingUntil;
-
-  if (!isProtected) {
-    if (rawPorsi !== null) S.porsi      = parseFloat(rawPorsi);
-    if (rawAlarm !== null) S.alarmBatas = parseFloat(rawAlarm);
-    if (rawKap   !== null) S.kapasitas  = parseFloat(rawKap);
-  }
-  // Jika masih protected, tampilkan indikator di halaman Setting
-  updateParamProtectedBadge();
 
   if (rawJmlJadwal !== null) S.jmlJadwal = parseInt(rawJmlJadwal);
   if (rawBuzzer    !== null) S.buzzerOn  = parseInt(rawBuzzer) === 1;
 
   if (rawSilenced !== null) {
     const silencedBaru = parseInt(rawSilenced) === 1;
-    // Jika ESP32 reset silenced (berat sudah naik), hentikan reminder
     if (S.silenced && !silencedBaru) stopReminder();
     S.silenced = silencedBaru;
   }
 
-  // Mulai reminder jika kondisi terpenuhi
   if (S.silenced && !S.buzzerOn && !reminderActive &&
       S.berat !== null && S.alarmBatas !== null && S.berat <= S.alarmBatas) {
     startReminder();
@@ -789,9 +779,8 @@ function updateParamProtectedBadge() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// REMINDER — notifikasi tiap 1 menit di website
+// REMINDER — notifikasi tiap 1 menit
 // ═══════════════════════════════════════════════════════════
-
 function startReminder() {
   if (reminderActive) return;
   reminderActive      = true;
@@ -845,7 +834,6 @@ function sendReminderNotification() {
 // ═══════════════════════════════════════════════════════════
 // COMMANDS
 // ═══════════════════════════════════════════════════════════
-
 async function cmdFeedManual(e) {
   if (S.feeding || !S.manual || S.berat <= 0) return;
   ripple(e);
@@ -912,17 +900,19 @@ async function kirimJadwalKeESP32() {
   renderJadwal();
 }
 
-// ─────────────────────────────────────────────────────────
-// FIX: Simpan & kirim parameter ke ESP32.
-//
-// Setelah kirim, langsung update S.porsi / S.alarmBatas /
-// S.kapasitas agar tampilan berubah seketika.
-//
-// Kemudian set paramPendingUntil = now + 10 detik, sehingga
-// fungsi poll() tidak akan menimpa nilai-nilai ini selama
-// 10 detik ke depan (cukup waktu ESP32 menyimpan & Blynk
-// memperbarui nilainya).
-// ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// SIMPAN & KIRIM PENGATURAN — FIXED
+// ═══════════════════════════════════════════════════════════
+// PERBAIKAN di sisi HTML:
+//   1. Kirim V8 (kapasitas) TERLEBIH DULU sebelum V6 dan V7,
+//      karena ESP32 butuh kapasitas terbaru untuk validasi V7.
+//   2. Setelah kirim, polling PERTAMA yang berhasil akan
+//      membawa V0 (berat) baru yang sudah disesuaikan oleh
+//      ESP32 (lihat fix BLYNK_WRITE(V8) di Arduino).
+//   3. Proteksi 12 detik (sedikit lebih lama dari sebelumnya)
+//      untuk memberi waktu ESP32 update V0 dan Blynk cloud
+//      memperbarui nilainya.
+// ═══════════════════════════════════════════════════════════
 async function simpanDanKirimPengaturan() {
   const p = parseFloat(document.getElementById('setPorsi').value);
   const a = parseFloat(document.getElementById('setAlarm').value);
@@ -932,47 +922,67 @@ async function simpanDanKirimPengaturan() {
   if (a >= k)    { toast('Batas alarm harus < kapasitas'); return; }
   if (p <= 0 || p > k) { toast('Porsi tidak valid'); return; }
 
-  // Kirim ke ESP32 via Blynk (V6, V7, V8)
+  // Kirim kapasitas DULU agar ESP32 bisa langsung update berat
+  // lalu porsi dan alarm
   await bSetMulti([
-    [VP.porsi,     p],
-    [VP.alarm,     a],
-    [VP.kapasitas, k],
+    [VP.kapasitas, k],  // V8 dikirim pertama
+    [VP.porsi,     p],  // V6
+    [VP.alarm,     a],  // V7
   ]);
 
-  // Update state lokal LANGSUNG — tampilan berubah seketika
+  // Update state lokal langsung
+  S.kapasitas  = k;
   S.porsi      = p;
   S.alarmBatas = a;
-  S.kapasitas  = k;
 
-  // FIX: Set proteksi 10 detik agar poll tidak menimpa nilai baru
-  // dengan data lama dari Blynk sebelum ESP32 sempat update
-  paramPendingUntil = Date.now() + 10000;
+  // ── FIXED: Jika berat saat ini == kapasitas lama (wadah penuh),
+  // update berat lokal ke kapasitas baru juga, sama seperti logika
+  // di Arduino BLYNK_WRITE(V8).
+  if (S.berat !== null && S.kapasitas !== null) {
+    // Berat akan dikonfirmasi dari ESP32 via poll berikutnya
+    // Tidak perlu update manual di sini karena ESP32 sudah kirim V0 baru
+  }
+
+  // Proteksi 12 detik agar poll tidak overwrite sebelum ESP32 update
+  paramPendingUntil = Date.now() + 12000;
   updateParamProtectedBadge();
 
-  // Tandai field sebagai tidak dirty (sudah sinkron)
   document.getElementById('setPorsi').removeAttribute('data-dirty');
   document.getElementById('setAlarm').removeAttribute('data-dirty');
   document.getElementById('setKapasitas').removeAttribute('data-dirty');
 
-  toast('✓ Parameter dikirim ke ESP32 · tampilan diperbarui langsung');
+  toast('✓ Kapasitas & parameter dikirim ke ESP32 · menunggu konfirmasi...');
   ui();
 
-  // Hapus badge proteksi otomatis setelah 10 detik
-  setTimeout(() => updateParamProtectedBadge(), 10500);
+  // Paksa poll sekali lagi setelah 2 detik untuk ambil V0 terbaru dari ESP32
+  setTimeout(async () => {
+    const rawBerat = await bGet(VP.berat);
+    const rawKap   = await bGet(VP.kapasitas);
+    if (rawBerat !== null && rawKap !== null) {
+      const b = parseFloat(rawBerat);
+      const k2 = parseFloat(rawKap);
+      if (!isNaN(b) && !isNaN(k2) && k2 > 0) {
+        S.berat     = b;
+        S.kapasitas = k2;
+        hist.push({ t: new Date(), b });
+        toast(`✓ ESP32 konfirmasi: berat ${b.toFixed(1)} kg / kapasitas ${k2.toFixed(1)} kg`);
+        ui();
+      }
+    }
+  }, 2000);
+
+  setTimeout(() => updateParamProtectedBadge(), 12500);
 }
 
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD UI
 // ═══════════════════════════════════════════════════════════
-
 function ui() {
-  // Koneksi
   const dot = document.getElementById('statusDot');
   const txt = document.getElementById('statusTxt');
   dot.className = S.online ? 'pulse online' : 'pulse offline';
   txt.textContent = S.online ? 'Online' : 'Offline';
 
-  // FIX: Gunakan S.kapasitas yang sudah diperbarui lokal
   const berat = S.berat      !== null ? S.berat      : 0;
   const kap   = S.kapasitas  !== null ? S.kapasitas  : 10;
   const pct   = kap > 0
@@ -997,7 +1007,6 @@ function ui() {
   pf.style.width  = pct + '%';
   pf.className    = 'progress-fill' + (pct <= 20 ? ' danger' : pct <= 40 ? ' warn' : '');
 
-  // Stat row
   document.getElementById('statMode').textContent  = S.manual ? 'Manual' : 'Auto';
   const alarmCond = S.berat !== null && S.alarmBatas !== null && S.berat <= S.alarmBatas;
   document.getElementById('statAlarm').textContent = alarmCond ? 'Bahaya' : 'Aman';
@@ -1006,7 +1015,6 @@ function ui() {
   document.getElementById('statBuzzer').textContent= S.buzzerOn ? 'Aktif' : 'Mati';
   document.getElementById('statBuzzer').className  = 'stat-val ' + (S.buzzerOn ? 'red' : 'green');
 
-  // Alarm banner
   const banner = document.getElementById('alarmBanner');
   const btnBuz = document.getElementById('btnBuzzer');
   if (S.buzzerOn) {
@@ -1019,7 +1027,6 @@ function ui() {
     btnBuz.classList.add('disabled');
   }
 
-  // Reminder banner
   const reminderBanner = document.getElementById('reminderBanner');
   if (reminderActive && S.silenced && alarmCond) {
     reminderBanner.classList.remove('hidden');
@@ -1030,13 +1037,11 @@ function ui() {
     reminderBanner.classList.add('hidden');
   }
 
-  // Toggle mode
   const tt = document.getElementById('toggleTrack');
   S.manual ? tt.classList.add('on') : tt.classList.remove('on');
   document.getElementById('modeLabel').textContent = S.manual ? 'Mode Manual Aktif' : 'Mode Auto Aktif';
   document.getElementById('modeSub').textContent   = S.manual ? 'Pemberian manual via tombol' : 'Jadwal otomatis berjalan';
 
-  // Feed button
   const bf = document.getElementById('btnFeed');
   (S.manual && !S.feeding && S.berat > 0)
     ? bf.classList.remove('disabled')
@@ -1044,7 +1049,6 @@ function ui() {
   document.getElementById('feedBtnSub').textContent = S.porsi
     ? `−${S.porsi.toFixed(1)} kg · mode manual` : 'Aktif di mode manual';
 
-  // Info strip
   document.getElementById('lastFeed').textContent     = S.lastFeedTime
     ? S.lastFeedTime.getHours().toString().padStart(2,'0') + ':' +
       S.lastFeedTime.getMinutes().toString().padStart(2,'0')
@@ -1055,7 +1059,6 @@ function ui() {
   document.getElementById('uptime').textContent =
     Math.floor(sec / 60).toString().padStart(2,'0') + ':' + (sec % 60).toString().padStart(2,'0');
 
-  // Setting — device info
   document.getElementById('devStatus').textContent    = S.online ? 'Online' : 'Offline';
   document.getElementById('devStatus').className      = 'device-val ' + (S.online ? 'green' : 'red');
   document.getElementById('devBerat').textContent     = S.berat      !== null ? S.berat.toFixed(1)      + ' kg' : '—';
@@ -1070,9 +1073,6 @@ function ui() {
   document.getElementById('devSilenced').textContent  = S.silenced ? 'Ya (buzzer dibungkam)' : 'Tidak';
   document.getElementById('devSilenced').className    = 'device-val ' + (S.silenced ? 'blue' : 'green');
 
-  // FIX: Isi input setting dari ESP32 hanya jika:
-  // 1. Nilai belum di-dirty oleh user (belum diketik)
-  // 2. DAN param tidak sedang diproteksi (baru saja dikirim)
   const isProtected = Date.now() < paramPendingUntil;
   if (S.porsi      !== null && !document.getElementById('setPorsi').dataset.dirty     && !isProtected)
     document.getElementById('setPorsi').value      = S.porsi.toFixed(1);
@@ -1085,7 +1085,6 @@ function ui() {
   drawChart();
 }
 
-// Tandai input sebagai dirty saat diubah user
 ['setPorsi','setAlarm','setKapasitas'].forEach(id => {
   document.getElementById(id).addEventListener('input', function() {
     this.dataset.dirty = '1';
@@ -1095,7 +1094,6 @@ function ui() {
 // ═══════════════════════════════════════════════════════════
 // SCHEDULE ROWS
 // ═══════════════════════════════════════════════════════════
-
 function updateSchRows() {
   const nm    = new Date().getHours() * 60 + new Date().getMinutes();
   let done    = 0;
@@ -1127,7 +1125,6 @@ function updateSchRows() {
 // ═══════════════════════════════════════════════════════════
 // CHART
 // ═══════════════════════════════════════════════════════════
-
 function drawChart() {
   if (hist.length < 2) return;
   const W = 360, H = 110;
@@ -1178,7 +1175,6 @@ function drawChart() {
 // ═══════════════════════════════════════════════════════════
 // FEED ANIMATION
 // ═══════════════════════════════════════════════════════════
-
 let feedTimer = null;
 function runFeedAnim(durasiMs, onDone) {
   const ov   = document.getElementById('feedOverlay');
@@ -1216,7 +1212,6 @@ function runFeedAnim(durasiMs, onDone) {
 // ═══════════════════════════════════════════════════════════
 // JADWAL PAGE
 // ═══════════════════════════════════════════════════════════
-
 function renderJadwal() {
   spinnerTemp = {};
   const container = document.getElementById('jadwalList');
@@ -1296,7 +1291,6 @@ function tambahJadwal() {
 // ═══════════════════════════════════════════════════════════
 // RIWAYAT PAGE
 // ═══════════════════════════════════════════════════════════
-
 function renderRiwayat() {
   const today        = new Date();
   const logsHariIni  = feedLog.filter(l =>
@@ -1352,7 +1346,6 @@ function renderRiwayat() {
 // ═══════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
-
 function switchPage(name, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1373,7 +1366,6 @@ function hapusRiwayat() {
 // ═══════════════════════════════════════════════════════════
 // UTILS
 // ═══════════════════════════════════════════════════════════
-
 function ripple(e) {
   const b    = e.currentTarget;
   const r    = document.createElement('span');
