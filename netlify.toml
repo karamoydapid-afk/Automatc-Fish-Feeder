@@ -1,5 +1,18 @@
+# ════════════════════════════════════════════════════════════
+# netlify.toml — Konfigurasi Netlify untuk Toba Nabasa Fish Feeder
+# ════════════════════════════════════════════════════════════
+
+# Proxy untuk Blynk Cloud API
+# HTML memanggil: /blynk-api/get?token=...&V0
+# Netlify akan forward ke: https://blynk.cloud/external/api/get?token=...&V0
 [[redirects]]
-  from = "/external/api/*"
+  from = "/blynk-api/*"
   to = "https://blynk.cloud/external/api/:splat"
   status = 200
   force = true
+
+# Semua route lain fallback ke index.html (SPA support)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
