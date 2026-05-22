@@ -1,18 +1,34 @@
 # ════════════════════════════════════════════════════════════
 # netlify.toml — Konfigurasi Netlify untuk Toba Nabasa Fish Feeder
 # ════════════════════════════════════════════════════════════
-
-# Proxy untuk Blynk Cloud API
-# HTML memanggil: /blynk-api/get?token=...&V0
-# Netlify akan forward ke: https://blynk.cloud/external/api/get?token=...&V0
+#
+# FIX CORS v8:
+# Browser tidak boleh fetch langsung ke https://blynk.cloud
+# karena Blynk tidak mengembalikan header Access-Control-Allow-Origin.
+#
+# Solusi: semua request dari index.html diarahkan ke /blynk-api/*
+# (path relatif, same-origin, tidak ada CORS), lalu Netlify
+# forward server-side ke blynk.cloud — browser tidak tahu
+# dan tidak terkena blokir CORS.
+#
+# index.html memanggil:
+#   /blynk-api/get?token=TOKEN&V0
+#   /blynk-api/update?token=TOKEN&V0=5
+#
+# Netlify forward ke:
+#   https://blynk.cloud/external/api/get?token=TOKEN&V0
+#   https://blynk.cloud/external/api/update?token=TOKEN&V0=5
+#
+# ════════════════════════════════════════════════════════════
+ 
+# Proxy Blynk Cloud API — hilangkan CORS error
 [[redirects]]
-  from = "/blynk-api/*"
-  to = "https://blynk.cloud/external/api/:splat"
+  from   = "/blynk-api/*"
+  to     = "https://blynk.cloud/external/api/:splat"
   status = 200
-  force = true
-
+  force  = true
+ 
 # Semua route lain fallback ke index.html (SPA support)
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+  from   = "/*"
+  to     = "/index.html"
